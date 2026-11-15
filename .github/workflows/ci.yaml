@@ -1,0 +1,149 @@
+---
+name: CI
+
+# yamllint disable-line rule:truthy
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, so new Homebrew audit rules, tool releases, and advisories surface without a push.
+    - cron: '17 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Python tools
+        run: |
+          set -euo pipefail
+          python3 -m venv "${RUNNER_TEMP}/venv"
+          "${RUNNER_TEMP}/venv/bin/pip" install --quiet --require-virtualenv -r ci/requirements.txt
+          echo "${RUNNER_TEMP}/venv/bin" >> "${GITHUB_PATH}"
+
+      - name: Run yamllint
+        run: |
+          yamllint --version
+          yamllint --strict .
+
+      # yamllint covers check-yaml; actionlint turns its shellcheck checks off
+      # when shellcheck is not on PATH.
+      - name: Run actionlint and the remaining pre-commit hooks
+        env:
+          SKIP: check-yaml
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          pre-commit --version
+          pre-commit run --all-files --show-diff-on-failure
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require an unshallow clone
+        run: test "$(git rev-parse --is-shallow-repository)" = false
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --proto "=https" --tlsv1.2 -sSfL -o "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${tarball}" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" gitleaks
+          "${RUNNER_TEMP}/gitleaks" version
+
+      - name: Run gitleaks over the history of the checked-out commit
+        run: '"${RUNNER_TEMP}/gitleaks" git --no-banner --redact --verbose --log-opts="HEAD" .'
+
+  formula:
+    name: Formula
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      HOMEBREW_NO_ANALYTICS: 1
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_ENV_HINTS: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Homebrew is a rolling release; the audit runs under its current rules.
+      - name: Update Homebrew
+        run: |
+          brew update --quiet
+          brew --version
+
+      - name: Tap this checkout
+        run: |
+          set -euo pipefail
+          tap="$(brew --repository)/Library/Taps/cdf-eagles/homebrew-tap"
+          mkdir -p "$(dirname "${tap}")"
+          ln -s "${GITHUB_WORKSPACE}" "${tap}"
+          brew trust --tap cdf-eagles/tap
+          brew tap-info cdf-eagles/tap
+
+      # brew audit skips the RuboCop style checks when given --tap.
+      - name: Check the formulae's style
+        run: brew style cdf-eagles/tap
+
+      - name: Audit the formulae
+        run: brew audit --strict --online --tap=cdf-eagles/tap
+
+      - name: Install findbig
+        run: brew install --formula --verbose cdf-eagles/tap/findbig
+
+      - name: Test findbig
+        run: brew test --verbose cdf-eagles/tap/findbig
+
+      - name: Check the command, the manual page, and the uninstall
+        run: |
+          set -euo pipefail
+          version="$(brew list --versions findbig | awk '{print $2}')"
+          test -n "${version}"
+          test "$(findbig --version)" = "findbig v${version}"
+          man -w findbig
+          brew uninstall --formula cdf-eagles/tap/findbig
+          if command -v findbig; then
+            echo "::error::findbig is still on PATH after the uninstall"
+            exit 1
+          fi
+
+  tool-drift:
+    name: Tool drift
+    if: github.event_name == 'schedule'
+    permissions:
+      contents: read
+      issues: write
+    uses: cdf-eagles/.github/.github/workflows/tool-drift.yaml@a3ceea039aa09885488009ee39ac07d9e7cfdefe  # v1.1.1
