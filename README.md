@@ -36,6 +36,7 @@ Each formula follows its project's releases: a new py-findbig release changes th
 |---|---|---|
 | `Lint` | Ubuntu 24.04 | `yamllint --strict`, then the pre-commit hooks: workflow and Dependabot schema checks, actionlint with shellcheck, whitespace and private-key checks, and ripsecrets |
 | `Secret scan` | Ubuntu 24.04 | gitleaks over the full history of an unshallow clone |
+| `Snyk` | Ubuntu 24.04 | installs the Python tools pinned in `ci/requirements.txt` and tests them with the Snyk command-line interface (CLI); fails on any high or critical dependency issue, a scan error, or a missing `SNYK_TOKEN` secret, which is set both as an Actions secret and as a Dependabot secret because Dependabot's pull requests cannot read Actions secrets |
 | `Formula` | macOS 15 | updates Homebrew, taps the checkout, runs `brew style` (Homebrew's RuboCop rules for formulae) and `brew audit --strict --online` over the tap, installs and tests `findbig`, checks that `findbig --version` names the installed version and that `man -w findbig` finds the manual page, then uninstalls it |
 | `Tool drift` | Ubuntu 24.04 | weekly only: opens an issue when a pinned tool that Dependabot cannot update falls behind |
 
@@ -61,9 +62,10 @@ SonarCloud analyses every pull request and `main` on its own (automatic analysis
 * Python tools (pre-commit, yamllint, check-jsonschema, shellcheck-py): `ci/requirements.txt`, exact `==` pins.
 * Pre-commit hooks: the `rev:` of each hook in `.pre-commit-config.yaml`.
 * gitleaks in CI: `GITLEAKS_VERSION` and `GITLEAKS_SHA256` in `.github/workflows/ci.yaml`.
+* The Snyk CLI in CI: `SNYK_VERSION` and `SNYK_SHA256` in `.github/workflows/ci.yaml`.
 * The Python a formula depends on: its `depends_on "python@3.y"` line, raised by hand when Homebrew's `python3` moves to a new minor version.
 
-Dependabot opens weekly pull requests for the Python tools, the hooks, and the actions; the weekly Tool drift job covers gitleaks.
+Dependabot opens weekly pull requests for the Python tools, the hooks, and the actions; the weekly Tool drift job covers gitleaks and the Snyk CLI.
 
 ## License
 
