@@ -3,8 +3,8 @@ class Findbig < Formula
 
   desc "List the largest files and directories under a directory"
   homepage "https://github.com/cdf-eagles/py-findbig"
-  url "https://github.com/cdf-eagles/py-findbig/archive/refs/tags/v0.6.0.tar.gz"
-  sha256 "7794aad98d0487e6d1668b8fa3f4121cd36574673ba8b6106fbbf415a30dce23"
+  url "https://github.com/cdf-eagles/py-findbig/archive/refs/tags/v0.7.0.tar.gz"
+  sha256 "9a8f1fdfe2ea4daa6b69e28cfe5eb161cf64911fab5cd30444749035409c61d0"
   license "BSD-3-Clause"
 
   depends_on "python@3.15"
